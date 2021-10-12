@@ -24,6 +24,7 @@ async Task Main() {
         ShowPlacements(leaderboards, playerMap[profileId]);
     players.Dump("Players", toDataGrid: true);
     //scores.Dump("Scores", toDataGrid: true);
+    ShowLevels(leaderboards);
     foreach (Leaderboard leaderboard in leaderboards)
         leaderboard.Display(playerMap);
 }
@@ -42,6 +43,7 @@ public static void ShowPlacements(IReadOnlyList<Leaderboard> leaderboards, Playe
     leaderboards.Select(leaderboard => (leaderboard.LevelId,
                                         leaderboard.Unscored,
                                         Solvers: leaderboard.Entries.Count,
+                                        leaderboard.TiedForFirst,
                                         Entry: leaderboard.Entries.SingleOrDefault(le => le.Score.PlayerId == player.Id)))
                 .Select(t => new {
                     Level = t.LevelId,
@@ -50,11 +52,16 @@ public static void ShowPlacements(IReadOnlyList<Leaderboard> leaderboards, Playe
                                : t.Unscored
                                    ? "unscored"
                                    : t.Entry.DisplayRank,
-                    t.Solvers
+                    t.Solvers,
+                    t.TiedForFirst
                 })
                 .Dump($"Placements for {player.Name}", toDataGrid: true);
 }
 
+public static void ShowLevels(IReadOnlyList<Leaderboard> leaderboards)
+    => leaderboards.Select(l => new { l.LevelId, l.Unscored, Solvers = l.Entries.Count, l.TiedForFirst, PercentTiedForFirst = (100m * l.TiedForFirst / l.Entries.Count).ToString("f2") })
+                   .OrderByDescending(o => o.Solvers)
+                   .Dump("Levels", toDataGrid: true);
 
 private static List<LeaderboardEntry> AddRankGroupEntries(List<LeaderboardEntry> list,
                                                           IReadOnlyList<Score> rankGroup) {
@@ -128,11 +135,19 @@ public record LeaderboardEntry(int Rank, bool Tie, Score Score) {
 }
 
 public record Leaderboard(string LevelId, IReadOnlyList<LeaderboardEntry> Entries) {
-    public bool Unscored => Entries.All(le => le.Score.Sum == 0);
+    private bool? _Unscored;
+    public bool Unscored => _Unscored ?? (_Unscored = Entries.All(le => le.Score.Sum == 0)).Value;
+    private int? _TiedForFirst;
+    public int TiedForFirst => _TiedForFirst ?? (_TiedForFirst = Entries.Count(le => le.Rank == 1)).Value;
 
     public void Display(IReadOnlyDictionary<int, Player> playerMap) {
         if (Unscored) {
             "unscored".Dump(LevelId);
+            return;
+        }
+
+        if (TiedForFirst > Configuration.LeaderboardPositionsShown) {
+            $"{TiedForFirst} players tied for first with Sum {Entries.First().Score.Sum}".Dump(LevelId);
             return;
         }
 
