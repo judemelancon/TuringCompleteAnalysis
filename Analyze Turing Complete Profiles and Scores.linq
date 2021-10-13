@@ -22,7 +22,8 @@ async Task Main() {
 
     foreach (int profileId in Configuration.ProfileIds)
         ShowPlacements(leaderboards, playerMap[profileId]);
-    players.Dump("Players", toDataGrid: true);
+    players.Select(p => p.ForDump(leaderboards))
+           .Dump("Players", toDataGrid: true);
     //scores.Dump("Scores", toDataGrid: true);
     ShowLevels(leaderboards);
     foreach (Leaderboard leaderboard in leaderboards)
@@ -114,6 +115,15 @@ public record Player(int Id, string Name) {
                                                         : string.IsNullOrWhiteSpace(Name)
                                                             ? "!![whitespace]"
                                                             : Name);
+
+    public object ForDump(IReadOnlyList<Leaderboard> leaderboards)
+        => new {
+            Id,
+            Name,
+            ProfileLink,
+            PlacementsLink = new Hyperlinq(() => ShowPlacements(leaderboards, this),
+                                           "Placements")
+        };
 }
 
 public record Score(int PlayerId, string LevelId, int Nands, int Delay, int Ticks) {
@@ -135,8 +145,7 @@ public record LeaderboardEntry(int Rank, bool Tie, Score Score) {
 }
 
 public record Leaderboard(string LevelId, IReadOnlyList<LeaderboardEntry> Entries) {
-    private bool? _Unscored;
-    public bool Unscored => _Unscored ?? (_Unscored = Entries.All(le => le.Score.Sum == 0)).Value;
+    public bool Unscored => TiedForFirst == Entries.Count && Entries[0].Score.Sum == 0;
     private int? _TiedForFirst;
     public int TiedForFirst => _TiedForFirst ?? (_TiedForFirst = Entries.Count(le => le.Rank == 1)).Value;
 
