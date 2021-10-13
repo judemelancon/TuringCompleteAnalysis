@@ -17,17 +17,15 @@ public static HttpClient Client { get; } = new HttpClient();
 async Task Main() {
     IReadOnlyList<Player> players = await GetPlayersAsync().ConfigureAwait(false);
     IReadOnlyList<Score> scores = await GetScoresAsync().ConfigureAwait(false);
+    //scores.Dump("Scores", toDataGrid: true);
     IReadOnlyDictionary<int, Player> playerMap = players.ToDictionary(p => p.Id);
     IReadOnlyList<Leaderboard> leaderboards = ConstructLeaderboards(scores);
 
-    foreach (int profileId in Configuration.ProfileIds)
-        ShowPlacements(leaderboards, playerMap[profileId]);
+    ShowLevels(playerMap, leaderboards);
     players.Select(p => p.ForDump(leaderboards))
            .Dump("Players", toDataGrid: true);
-    //scores.Dump("Scores", toDataGrid: true);
-    ShowLevels(leaderboards);
-    foreach (Leaderboard leaderboard in leaderboards)
-        leaderboard.Display(playerMap);
+    foreach (int profileId in Configuration.ProfileIds)
+        ShowPlacements(leaderboards, playerMap[profileId]);
 }
 
 public static IReadOnlyList<Leaderboard> ConstructLeaderboards(IReadOnlyList<Score> scores)
@@ -38,11 +36,12 @@ public static IReadOnlyList<Leaderboard> ConstructLeaderboards(IReadOnlyList<Sco
                                                                          .Select(rankGroup => rankGroup.ToList())
                                                                          .Aggregate(new List<LeaderboardEntry>(),
                                                                                     (list, rankGroup) => AddRankGroupEntries(list, rankGroup))))
+             .OrderByDescending(o => o.Entries.Count)
              .ToArray();
 
 public static void ShowPlacements(IReadOnlyList<Leaderboard> leaderboards, Player player) {
     leaderboards.Select(leaderboard => (leaderboard.LevelId,
-                                        leaderboard.Unscored,
+                                        leaderboard.Scored,
                                         Solvers: leaderboard.Entries.Count,
                                         leaderboard.TiedForFirst,
                                         Entry: leaderboard.Entries.SingleOrDefault(le => le.Score.PlayerId == player.Id)))
@@ -50,18 +49,28 @@ public static void ShowPlacements(IReadOnlyList<Leaderboard> leaderboards, Playe
                     Level = t.LevelId,
                     Rank = t.Entry == null
                                ? "incomplete"
-                               : t.Unscored
-                                   ? "unscored"
-                                   : t.Entry.DisplayRank,
+                               : t.Scored
+                                   ? t.Entry.DisplayRank
+                                   : "unscored",
                     t.Solvers,
                     t.TiedForFirst
                 })
                 .Dump($"Placements for {player.Name}", toDataGrid: true);
 }
 
-public static void ShowLevels(IReadOnlyList<Leaderboard> leaderboards)
-    => leaderboards.Select(l => new { l.LevelId, l.Unscored, Solvers = l.Entries.Count, l.TiedForFirst, PercentTiedForFirst = (100m * l.TiedForFirst / l.Entries.Count).ToString("f2") })
-                   .OrderByDescending(o => o.Solvers)
+public static void ShowLevels(IReadOnlyDictionary<int, Player> playerMap, IReadOnlyList<Leaderboard> leaderboards)
+    => leaderboards
+                   .Select(l => new {
+                       l.LevelId,
+                       l.Scored,
+                       Solvers = l.Entries.Count,
+                       l.TiedForFirst,
+                       PercentTiedForFirst = $"{(100m * l.TiedForFirst / l.Entries.Count):f2}%",
+                       Minimum = l.Minimum.ToString("n0"),
+                       Median = l.Median.ToString("n1"),
+                       Maximum = l.Maximum.ToString("n0"),
+                       LeaderboardLink = l.GetLeaderboardLink(playerMap)
+                   })
                    .Dump("Levels", toDataGrid: true);
 
 private static List<LeaderboardEntry> AddRankGroupEntries(List<LeaderboardEntry> list,
@@ -133,35 +142,33 @@ public record Score(int PlayerId, string LevelId, int Nands, int Delay, int Tick
 public record LeaderboardEntry(int Rank, bool Tie, Score Score) {
     public string DisplayRank => Rank + (Tie ? "*" : string.Empty);
 
-    public object ForDump(IReadOnlyDictionary<int, Player> playerMap)
-        => new {
-            Rank = DisplayRank,
-            NAND = Score.Nands,
-            Score.Delay,
-            Score.Ticks,
-            Score.Sum,
-            Player = playerMap[Score.PlayerId].ProfileLink
-        };
+    public LeaderboardEntryDisplay ForDump(IReadOnlyDictionary<int, Player> playerMap)
+        => new LeaderboardEntryDisplay(DisplayRank, Score.Nands, Score.Delay, Score.Ticks, Score.Sum, playerMap[Score.PlayerId].ProfileLink);
 }
 
+public record LeaderboardEntryDisplay(string Rank, object NAND, object Delay, object Ticks, object Sum, Hyperlinq Player) { }
+
 public record Leaderboard(string LevelId, IReadOnlyList<LeaderboardEntry> Entries) {
-    public bool Unscored => TiedForFirst == Entries.Count && Entries[0].Score.Sum == 0;
+    public bool Scored => !(TiedForFirst == Entries.Count && Entries[0].Score.Sum == 0);
     private int? _TiedForFirst;
     public int TiedForFirst => _TiedForFirst ?? (_TiedForFirst = Entries.Count(le => le.Rank == 1)).Value;
+    private int? _Minimum;
+    public int Minimum => _Minimum ?? (_Minimum = Entries.Min(le => le.Score.Sum)).Value;
+    private decimal? _Median;
+    public decimal Median => _Median ?? (_Median = Entries.Count % 2 == 1 ? Entries[Entries.Count / 2].Score.Sum : 0.5m * (Entries[Entries.Count / 2].Score.Sum + Entries[Entries.Count / 2 - 1].Score.Sum)).Value;
+    private int? _Maximum;
+    public int Maximum => _Maximum ?? (_Maximum = Entries.Max(le => le.Score.Sum)).Value;
 
-    public void Display(IReadOnlyDictionary<int, Player> playerMap) {
-        if (Unscored) {
-            "unscored".Dump(LevelId);
-            return;
-        }
-
-        if (TiedForFirst > Configuration.LeaderboardPositionsShown) {
-            $"{TiedForFirst} players tied for first with Sum {Entries.First().Score.Sum}".Dump(LevelId);
-            return;
-        }
-
-        Entries.Take(Configuration.LeaderboardPositionsShown)
-               .Select(le => le.ForDump(playerMap))
-               .Dump(LevelId, toDataGrid: true);
+    public Hyperlinq GetLeaderboardLink(IReadOnlyDictionary<int, Player> playerMap) {
+        if (!Scored)
+            return new Hyperlinq(() => { }, "unscored");
+        if (TiedForFirst > Configuration.LeaderboardPositionsShown)
+            return new Hyperlinq(() => { }, "large tie");
+        return new Hyperlinq(() => Display(playerMap), "Leaderboard");
     }
+
+    public void Display(IReadOnlyDictionary<int, Player> playerMap)
+        => Entries.Take(Configuration.LeaderboardPositionsShown)
+                  .Select(le => le.ForDump(playerMap))
+                  .Dump(LevelId, toDataGrid: true);
 }
