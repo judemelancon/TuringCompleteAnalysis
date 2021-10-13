@@ -1,6 +1,7 @@
 <Query Kind="Program">
   <Namespace>System.Threading.Tasks</Namespace>
   <Namespace>System.Net.Http</Namespace>
+  <Namespace>System.Windows.Forms.DataVisualization.Charting</Namespace>
 </Query>
 
 // This is can be run in LINQPad ( http://www.linqpad.net/ ) in C# Program mode.
@@ -8,6 +9,9 @@
 public static class Configuration {
     public const int LeaderboardPositionsShown = 100;
     public static readonly IReadOnlyList<int> ProfileIds = new[] { 11, 6 };
+    public const bool ChartOnlyScoredLevels = false;
+    public const bool ChartScoresLogarithmically = true;
+    public static readonly (int Width, int Height)? ChartImageDimensions = null; // e.g. (2000,1000)
 }
 
 public const string ScoresKey = "TuringCompleteGameScores";
@@ -24,8 +28,13 @@ async Task Main() {
     ShowLevels(playerMap, leaderboards);
     players.Select(p => p.ForDump(leaderboards))
            .Dump("Players", toDataGrid: true);
-    foreach (int profileId in Configuration.ProfileIds)
-        ShowPlacements(leaderboards, playerMap[profileId]);
+
+    IReadOnlyList<Player> selectedPlayers = Configuration.ProfileIds
+                                                         .Select(playerId => playerMap[playerId])
+                                                         .ToArray();
+    foreach (Player player in selectedPlayers)
+        ShowPlacements(leaderboards, player);
+    ChartPlayers(leaderboards, selectedPlayers);
 }
 
 public static IReadOnlyList<Leaderboard> ConstructLeaderboards(IReadOnlyList<Score> scores)
@@ -36,13 +45,13 @@ public static IReadOnlyList<Leaderboard> ConstructLeaderboards(IReadOnlyList<Sco
                                                                          .Select(rankGroup => rankGroup.ToList())
                                                                          .Aggregate(new List<LeaderboardEntry>(),
                                                                                     (list, rankGroup) => AddRankGroupEntries(list, rankGroup))))
-             .OrderByDescending(o => o.Entries.Count)
+             .OrderByDescending(o => o.Solvers)
              .ToArray();
 
 public static void ShowPlacements(IReadOnlyList<Leaderboard> leaderboards, Player player) {
     leaderboards.Select(leaderboard => (leaderboard.LevelId,
                                         leaderboard.Scored,
-                                        Solvers: leaderboard.Entries.Count,
+                                        leaderboard.Solvers,
                                         leaderboard.TiedForFirst,
                                         Entry: leaderboard.Entries.SingleOrDefault(le => le.Score.PlayerId == player.Id)))
                 .Select(t => new {
@@ -58,14 +67,49 @@ public static void ShowPlacements(IReadOnlyList<Leaderboard> leaderboards, Playe
                 .Dump($"Placements for {player.Name}", toDataGrid: true);
 }
 
+public static void ChartPlayers(IReadOnlyList<Leaderboard> leaderboards, IReadOnlyList<Player> players) {
+    int? GetPlayerScore(Leaderboard leaderboard, int playerId) {
+        int? scoreSum = leaderboard.Entries.SingleOrDefault(le => le.Score.PlayerId == playerId)?.Score.Sum;
+        if (Configuration.ChartScoresLogarithmically && scoreSum.HasValue)
+            return Math.Max(1, scoreSum.Value);
+        return scoreSum;
+    }
+
+    LINQPadChart<Leaderboard> chart = leaderboards.Where(l => !Configuration.ChartOnlyScoredLevels || l.Scored)
+                                                  .Chart(l => l.LevelId)
+                                                  .AddYSeries(l => Configuration.ChartScoresLogarithmically ? Math.Max(1, l.Minimum) : l.Minimum, Util.SeriesType.Line, name: "Best")
+                                                  .AddYSeries(l => Configuration.ChartScoresLogarithmically ? Math.Max(1, l.Median) : l.Median, Util.SeriesType.Line, name: "Median")
+                                                  .AddYSeries(l => l.Solvers, Util.SeriesType.Area, name: "Solvers", useSecondaryYAxis: true);
+    foreach (Player player in players)
+        chart.AddYSeries(l => GetPlayerScore(l, player.Id), Util.SeriesType.Point, name: player.Name);
+
+    Chart windowsChart = chart.ToWindowsChart();
+    windowsChart.Series["Solvers"].Color = System.Drawing.Color.FromArgb(63, System.Drawing.Color.LightGray);
+    foreach (Series series in windowsChart.Series.Skip(3))
+        series.MarkerSize = 9;
+    ChartArea chartArea = windowsChart.ChartAreas.Single();
+    chartArea.AxisY.IsStartedFromZero = true;
+    chartArea.AxisY.Title = (Configuration.ChartScoresLogarithmically ? "Binary Logarithm of " : string.Empty) + "Sum of Scores";
+    if (Configuration.ChartScoresLogarithmically) {
+        chartArea.AxisY.IsLogarithmic = true;
+        chartArea.AxisY.LogarithmBase = 2.0;
+    }
+    chartArea.AxisY2.IsStartedFromZero = true;
+    chartArea.AxisY2.MajorGrid.Enabled = false;
+
+    windowsChart.Dump();
+    if (Configuration.ChartImageDimensions.HasValue)
+        windowsChart.ToBitmap(Configuration.ChartImageDimensions.Value.Width, Configuration.ChartImageDimensions.Value.Height).Dump("Chart Image");
+}
+
 public static void ShowLevels(IReadOnlyDictionary<int, Player> playerMap, IReadOnlyList<Leaderboard> leaderboards)
     => leaderboards
                    .Select(l => new {
                        l.LevelId,
                        l.Scored,
-                       Solvers = l.Entries.Count,
+                       l.Solvers,
                        l.TiedForFirst,
-                       PercentTiedForFirst = $"{(100m * l.TiedForFirst / l.Entries.Count):f2}%",
+                       PercentTiedForFirst = $"{(100m * l.TiedForFirst / l.Solvers):f2}%",
                        Minimum = l.Minimum.ToString("n0"),
                        Median = l.Median.ToString("n1"),
                        Maximum = l.Maximum.ToString("n0"),
@@ -149,6 +193,7 @@ public record LeaderboardEntry(int Rank, bool Tie, Score Score) {
 public record LeaderboardEntryDisplay(string Rank, object NAND, object Delay, object Ticks, object Sum, Hyperlinq Player) { }
 
 public record Leaderboard(string LevelId, IReadOnlyList<LeaderboardEntry> Entries) {
+    public int Solvers => Entries.Count;
     public bool Scored => !(TiedForFirst == Entries.Count && Entries[0].Score.Sum == 0);
     private int? _TiedForFirst;
     public int TiedForFirst => _TiedForFirst ?? (_TiedForFirst = Entries.Count(le => le.Rank == 1)).Value;
