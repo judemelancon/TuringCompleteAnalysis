@@ -20,6 +20,7 @@ public static class Configuration {
     /// <summary>If set, this produces and dumps a static image of the chart suitable for sharing.</summary>
     public static readonly (int Width, int Height)? ChartImageDimensions = null; // e.g. (2000,1000)
     public const string NotApplicableText = "-";
+    public const string IncompleteText = "i";
 }
 
 public const string ScoresKey = "TuringCompleteGameScores";
@@ -178,8 +179,8 @@ public record PlacementEntry(Level Level, LeaderboardEntry Entry) {
                        : Level.Scored
                            ? Entry.DisplayRank
                            : "unscored",
-            Sigma = Entry?.SigmaText ?? "I",
-            Pseudopercentile = Entry?.Pseudopercentile ?? "I",
+            Sigma = Entry?.SigmaText ?? Configuration.IncompleteText,
+            Pseudopercentile = Entry?.Pseudopercentile ?? Configuration.IncompleteText,
             Solvers = Level.SolversText,
             TiedForFirst = Level.TiedForFirstText,
             PercentTiedForFirst = Level.PercentTiedForFirst
@@ -337,7 +338,7 @@ public record Level {
 public static double? CumulativeDistributionOfStandardNormalDistribution(double zScore) {
     [DllImport("ucrtbase.dll", CallingConvention = CallingConvention.Cdecl, EntryPoint = "erf")]
     static extern double Erf(double x);
-    
+
     try {
         return 0.5 * (1.0 + Erf(zScore / Math.Sqrt(2.0)));
     }
