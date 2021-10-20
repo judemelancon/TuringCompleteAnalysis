@@ -7,6 +7,8 @@ This is a script for analysis of the scores for the game [_Turing Complete_](htt
 This is just the most straightforward way.
 
 * Install [LINQPad 6 or higher](https://www.linqpad.net/), keeping its default to associate with `.linq` files.
+* Download the script and save it with the `.linq` extension.
+  * For example, use "Save link as..." or equivalent on [this link](https://raw.githubusercontent.com/judemelancon/TuringCompleteAnalysis/main/Scripts/Analyze%20Turing%20Complete%20Profiles%20and%20Scores.linq).
 * Double-click the downloaded `.linq` file.
 * Run with the play button or the F5 key.
 
