@@ -1,6 +1,9 @@
 # Turing Complete Analysis
 
-This is a script for analysis of the scores for the game [_Turing Complete_](https://turingcomplete.game/). The game starts with basic logic gates and advances through assembly programming on a self-designed and -built computer.
+This is an unofficial tool for analysis of the scores for the game [_Turing Complete_](https://turingcomplete.game/).
+The game starts with basic logic gates and builds to assembly programming on a computer built by the player to their own design.
+Eventually, players unlock scoring based on gates, delay, and ticks.
+This tool generates leaderboards, displays placements by player, shows level score statistics, and makes charts.
 
 ## Getting Started
 
