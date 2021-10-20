@@ -181,6 +181,10 @@ public record PlacementEntry(Level Level, LeaderboardEntry Entry) {
                            : "unscored",
             Sigma = Entry?.SigmaText ?? Configuration.IncompleteText,
             Pseudopercentile = Entry?.Pseudopercentile ?? Configuration.IncompleteText,
+            NANDs = Entry?.NandsText ?? Configuration.IncompleteText,
+            Delay = Entry?.DelayText ?? Configuration.IncompleteText,
+            Ticks = Entry?.TicksText ?? Configuration.IncompleteText,
+            Sum = Entry?.SumText ?? Configuration.IncompleteText,
             Solvers = Level.SolversText,
             TiedForFirst = Level.TiedForFirstText,
             PercentTiedForFirst = Level.PercentTiedForFirst
@@ -192,18 +196,23 @@ public record Score(int PlayerId, string LevelId, int Nands, int Delay, int Tick
     public Player Player => PlayerMap[PlayerId];
 }
 
-public record LeaderboardEntry(int Rank, bool Tie, Score Score, double? Sigma) {
+public record LeaderboardEntry(bool Scored, bool TicksScored, int Rank, bool Tie, Score Score, double? Sigma) {
     public string DisplayRank => Rank + (Tie ? "*" : string.Empty);
     public string SigmaText => Sigma?.ToString("f2") ?? Configuration.NotApplicableText;
     public string Pseudopercentile => Sigma.HasValue ? $"{100.0 * CumulativeDistributionOfStandardNormalDistribution(Sigma.Value):f2}%" : Configuration.NotApplicableText;
 
+    public string NandsText => Scored ? Score.Nands.ToString("n0") : Configuration.NotApplicableText;
+    public string DelayText => Scored ? Score.Delay.ToString("n0") : Configuration.NotApplicableText;
+    public string TicksText => TicksScored ? Score.Ticks.ToString("n0") : Configuration.NotApplicableText;
+    public string SumText => Scored ? Score.Sum.ToString("n0") : Configuration.NotApplicableText;
+
     private object ToDump()
         => new {
             Rank = DisplayRank,
-            Score.Nands,
-            Score.Delay,
-            Score.Ticks,
-            Score.Sum,
+            NANDs = NandsText,
+            Delay = DelayText,
+            Ticks = TicksText,
+            Sum = SumText,
             Sigma = SigmaText,
             Pseudopercentile,
             Player = Score.Player.ProfileLink,
@@ -216,6 +225,7 @@ public record Level {
     public IReadOnlyList<LeaderboardEntry> Entries { get; init; }
 
     public bool Scored { get; init; }
+    public bool TicksScored { get; init; }
     public int? TiedForFirst { get; init; }
     public int? Minimum { get; init; }
     public decimal? Median { get; init; }
@@ -256,6 +266,7 @@ public record Level {
         => new {
             LevelId,
             Scored,
+            TicksScored,
             Solvers = SolversText,
             TiedForFirst = TiedForFirstText,
             PercentTiedForFirst,
@@ -268,9 +279,9 @@ public record Level {
         };
 
     public static IReadOnlyList<Level> ConstructLevels() {
-        List<LeaderboardEntry> AddRankGroupEntries(Func<int, double?> getSigmaScore, List<LeaderboardEntry> entries, IReadOnlyList<Score> rankGroup) {
+        List<LeaderboardEntry> AddRankGroupEntries(bool scored, bool ticksScored, Func<int, double?> getSigmaScore, List<LeaderboardEntry> entries, IReadOnlyList<Score> rankGroup) {
             int rank = entries.Count + 1;
-            entries.AddRange(rankGroup.Select(s => new LeaderboardEntry(rank, rankGroup.Count > 1, s, getSigmaScore(s.Sum))));
+            entries.AddRange(rankGroup.Select(s => new LeaderboardEntry(scored, ticksScored, rank, rankGroup.Count > 1, s, getSigmaScore(s.Sum))));
             return entries;
         }
 
@@ -281,7 +292,7 @@ public record Level {
                                                   t.Summary.Scores.GroupBy(s => s.Sum)
                                                                   .OrderBy(rankGroup => rankGroup.Key)
                                                                   .Select(rankGroup => rankGroup.ToList())
-                                                                  .Aggregate(new List<LeaderboardEntry>(), (list, rankGroup) => AddRankGroupEntries(t.Summary.GetSigmaScore, list, rankGroup))))
+                                                                  .Aggregate(new List<LeaderboardEntry>(), (list, rankGroup) => AddRankGroupEntries(t.Summary.Scored, t.Summary.TicksScored, t.Summary.GetSigmaScore, list, rankGroup))))
                      .OrderByDescending(l => l.Solvers)
                      .ToArray();
     }
@@ -304,6 +315,7 @@ public record Level {
 
         return new Level(levelId, entries) {
             Scored = true,
+            TicksScored = summary.TicksScored,
             TiedForFirst = tiedForFirst,
             Minimum = minimum,
             Median = median,
@@ -316,6 +328,7 @@ public record Level {
     private sealed class ScoreSummary {
         public IReadOnlyList<Score> Scores { get; init; }
         public bool Scored { get; init; }
+        public bool TicksScored { get; init; }
         public double? Mean { get; init; }
         public double? StandardDeviation { get; init; }
 
@@ -326,6 +339,7 @@ public record Level {
                                                       .Where(s => !Configuration.ScoreCensoringThreshold.HasValue || s < Configuration.ScoreCensoringThreshold)
                                                       .ToList();
             if (Scored) {
+                TicksScored = !Scores.All(s => s.Ticks == 0);
                 Mean = censoredScores.Average();
                 StandardDeviation = Math.Sqrt(censoredScores.Sum(s => (s - Mean.Value) * (s - Mean.Value)) / censoredScores.Count);
             }
