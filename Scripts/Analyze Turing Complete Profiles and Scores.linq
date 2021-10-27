@@ -14,6 +14,7 @@ public static class Configuration {
     public static readonly IReadOnlyList<int> ProfileIds = new[] { 11, 6 };
     public const bool ChartOnlyScoredLevels = false;
     public const bool ChartScoresLogarithmically = true;
+    public const bool LogarithmicHistograms = false;
     /// <summary>If set, scores above this threshold are removed from most statistics. null disables the censoring threshold entirely.</summary>
     /// <remarks>99,999 is currently the score for using an unscored component. It skews the statistics pretty badly to leave those in the calculations.</remarks>
     public static readonly int? ScoreCensoringThreshold = 99999;
@@ -21,6 +22,8 @@ public static class Configuration {
     public static readonly (int Width, int Height)? ChartImageDimensions = null; // e.g. (2000,1000)
     public const string NotApplicableText = "-";
     public const string IncompleteText = "i";
+
+    internal static int GetMaximumScoreShownOnHistogram(int solvers, decimal median, int maximum) => solvers <= Configuration.LeaderboardPositionsShown ? maximum : Math.Min((int) Math.Ceiling(2m * median), maximum);
 }
 
 public const string ScoresKey = "TuringCompleteGameScores";
@@ -174,6 +177,7 @@ public record PlacementEntry(Level Level, LeaderboardEntry Entry) {
     private object ToDump()
         => new {
             Level = new Hyperlinq(() => Level.DisplayLeaderboard(), Level.LevelId),
+            Histogram = Level.GetHistogramLink(),
             Rank = Entry == null
                        ? "incomplete"
                        : Level.Scored
@@ -238,6 +242,9 @@ public record Level {
     private IReadOnlyList<LeaderboardEntry> _Leaderboard;
     public IReadOnlyList<LeaderboardEntry> Leaderboard => _Leaderboard ?? (_Leaderboard = Entries.Take(Configuration.LeaderboardPositionsShown).ToList());
 
+    private Chart _Histogram;
+    private Chart Histogram => _Histogram ?? (_Histogram = GenerateHistogram());
+
     public string SolversText => Solvers.ToString("n0");
     public string TiedForFirstText => TiedForFirst?.ToString("n0") ?? Configuration.NotApplicableText;
     public string PercentTiedForFirst => TiedForFirst.HasValue ? $"{100m * TiedForFirst.Value / Solvers:f2}%" : Configuration.NotApplicableText;
@@ -260,7 +267,39 @@ public record Level {
         return new Hyperlinq(() => DisplayLeaderboard(), "Leaderboard");
     }
 
-    public void DisplayLeaderboard() => Leaderboard.Dump(LevelId, toDataGrid: true);
+    public Hyperlinq GetHistogramLink() {
+        if (!Scored)
+            return new Hyperlinq(() => { }, "unscored");
+        return new Hyperlinq(() => DisplayHistogram(), "Histogram");
+    }
+
+    public void DisplayLeaderboard() => Leaderboard.Dump($"{LevelId} Leaderboard", toDataGrid: true);
+
+    public void DisplayHistogram() => Histogram.Dump($"{LevelId} Histogram");
+
+    private Chart GenerateHistogram() {
+        if (!Scored)
+            return null;
+        int maximumShown = Configuration.GetMaximumScoreShownOnHistogram(Solvers, Median.Value, Maximum.Value);
+        LINQPadChart chart = Enumerable.Range(Minimum.Value, maximumShown)
+                                       .GroupJoin(ExtractCensoredScores(Entries),
+                                                  i => i,
+                                                  i => i,
+                                                  (i, iei) => (Sum: i, Count: (int?)iei.Count()))
+                                       .Select(t => (t.Sum, Count: Configuration.ChartScoresLogarithmically && t.Count == 0 ? null : t.Count))
+                                       .ToList()
+                                       .Chart(t => t.Sum)
+                                       .AddYSeries(t => t.Count, name: "Frequency");
+        Chart windowsChart = chart.ToWindowsChart();
+        windowsChart.Series["Frequency"].ToolTip = "#VAL scored #VALX";
+        ChartArea chartArea = windowsChart.ChartAreas.Single();
+        if (Configuration.LogarithmicHistograms) {
+            chartArea.AxisY.IsLogarithmic = true;
+            chartArea.AxisY.LogarithmBase = 2.0;
+            chartArea.AxisY.Minimum = 0.5;
+        }
+        return windowsChart;
+    }
 
     private object ToDump()
         => new {
@@ -275,7 +314,8 @@ public record Level {
             Worst = MaximumText,
             Mean = MeanText,
             StandardDeviation = StandardDeviationText,
-            Leaderboard = GetLeaderboardLink()
+            Leaderboard = GetLeaderboardLink(),
+            Histogram = GetHistogramLink()
         };
 
     public static IReadOnlyList<Level> ConstructLevels() {
@@ -301,9 +341,7 @@ public record Level {
         if (!summary.Scored)
             return new Level(levelId, entries);
 
-        IReadOnlyList<int> censoredScores = entries.Select(le => le.Score.Sum)
-                                                   .TakeWhile(s => !Configuration.ScoreCensoringThreshold.HasValue || s < Configuration.ScoreCensoringThreshold)
-                                                   .ToList();
+        IReadOnlyList<int> censoredScores = ExtractCensoredScores(entries);
 
         int minimum = censoredScores.Min();
         decimal median = censoredScores.Count % 2 == 1
@@ -324,6 +362,11 @@ public record Level {
             StandardDeviation = summary.StandardDeviation
         };
     }
+
+    private static IReadOnlyList<int> ExtractCensoredScores(IReadOnlyList<LeaderboardEntry> entries)
+        => entries.Select(le => le.Score.Sum)
+                  .TakeWhile(s => !Configuration.ScoreCensoringThreshold.HasValue || s < Configuration.ScoreCensoringThreshold)
+                  .ToList();
 
     private sealed class ScoreSummary {
         public IReadOnlyList<Score> Scores { get; init; }
