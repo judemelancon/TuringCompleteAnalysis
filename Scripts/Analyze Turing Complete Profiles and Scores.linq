@@ -67,15 +67,15 @@ public static void ChartPlayers(IReadOnlyList<Player> includedPlayers) {
     LINQPadChart<Level> chart = Levels.Where(l => !Configuration.ChartOnlyScoredLevels || l.Scored)
                                       .Chart(l => l.LevelId)
                                       .AddYSeries(l => Configuration.ChartScoresLogarithmically
-                                                           ? l.Minimum.HasValue
-                                                               ? Math.Max(1, l.Minimum.Value)
+                                                           ? l.Minimum > 0
+                                                               ? l.Minimum
                                                                : null
                                                            : l.Minimum,
                                                   Util.SeriesType.Line,
                                                   name: "Best")
                                       .AddYSeries(l => Configuration.ChartScoresLogarithmically
-                                                           ? l.Median.HasValue
-                                                               ? Math.Max(1, l.Median.Value)
+                                                           ? l.Median > 0
+                                                               ? l.Median
                                                                : null
                                                            : l.Median,
                                                   Util.SeriesType.Line,
