@@ -70,10 +70,10 @@ public static void ChartPlayers(IReadOnlyList<Player> includedPlayers) {
     LINQPadChart<Level> chart = Levels.Where(l => !Configuration.ChartOnlyScoredLevels || l.Scored)
                                       .Chart(l => l.LevelId)
                                       .AddYSeries(l => Configuration.ChartScoresLogarithmically && l.Minimum == 0 ? null : l.Minimum,
-                                                  Util.SeriesType.Line,
+                                                  Util.SeriesType.Column,
                                                   name: "Best")
                                       .AddYSeries(l => Configuration.ChartScoresLogarithmically && l.Median == 0m ? null : l.Median,
-                                                  Util.SeriesType.Line,
+                                                  Util.SeriesType.Column,
                                                   name: "Median")
                                       .AddYSeries(l => l.Solvers, Util.SeriesType.Area, name: "Solvers", useSecondaryYAxis: true);
     foreach (Player player in includedPlayers)
