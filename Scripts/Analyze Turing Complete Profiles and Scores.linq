@@ -353,15 +353,22 @@ public static double? CumulativeDistributionOfStandardNormalDistribution(double 
     [DllImport("ucrtbase.dll", CallingConvention = CallingConvention.Cdecl, EntryPoint = "erf")]
     static extern double Erf(double x);
 
+    double ApproximateErf(double x) {
+        // Abramowitz & Stegun Handbook of Mathematical Functions 7.1.26
+        double a = Math.Abs(x);
+        double t = 1.0 / Math.FusedMultiplyAdd(0.3275911, a, 1.0);
+        double y = 1.0 - t * Math.Exp(-a * a) * Math.FusedMultiplyAdd(Math.FusedMultiplyAdd(Math.FusedMultiplyAdd(Math.FusedMultiplyAdd(1.061405429, t, -1.453152027), t, 1.421413741), t, -0.284496736), t, 0.254829592);
+        return Math.CopySign(y, x);
+    }
+
+    double x = zScore / Math.Sqrt(2.0);
+    double erf;
     try {
-        return 0.5 * (1.0 + Erf(zScore / Math.Sqrt(2.0)));
+        erf = Erf(x);
     }
     catch {
         // less accurate fallback if P/Invoke fails
-        // Abramowitz & Stegun Handbook of Mathematical Functions 7.1.26
-        double z = Math.Abs(zScore) / Math.Sqrt(2.0);
-        double t = 1.0 / Math.FusedMultiplyAdd(0.3275911, z, 1.0);
-        double y = 1.0 - t * Math.Exp(-z * z) * Math.FusedMultiplyAdd(Math.FusedMultiplyAdd(Math.FusedMultiplyAdd(Math.FusedMultiplyAdd(1.061405429, t, -1.453152027), t, 1.421413741), t, -0.284496736), t, 0.254829592);
-        return 0.5 * (1.0 + Math.CopySign(y, zScore));
+        erf = ApproximateErf(x);
     }
+    return 0.5 + 0.5 * erf;
 }
