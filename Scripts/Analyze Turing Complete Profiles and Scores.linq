@@ -1,4 +1,5 @@
 <Query Kind="Program">
+  <Namespace>System.Drawing</Namespace>
   <Namespace>System.Net.Http</Namespace>
   <Namespace>System.Runtime.InteropServices</Namespace>
   <Namespace>System.Threading.Tasks</Namespace>
@@ -15,6 +16,7 @@ public static class Configuration {
     public const bool ChartOnlyScoredLevels = false;
     public const bool ChartScoresLogarithmically = true;
     public const bool LogarithmicHistograms = false;
+    public const int MaximumHistogramBuckets = 50;
     /// <summary>If set, scores above this threshold are removed from most statistics. null disables the censoring threshold entirely.</summary>
     /// <remarks>99,999 is currently the score for using an unscored component. It skews the statistics pretty badly to leave those in the calculations.</remarks>
     public static readonly int? ScoreCensoringThreshold = 99999;
@@ -23,7 +25,10 @@ public static class Configuration {
     public const string NotApplicableText = "-";
     public const string IncompleteText = "i";
 
-    internal static int GetMaximumScoreShownOnHistogram(int solvers, decimal median, int maximum) => solvers <= Configuration.LeaderboardPositionsShown ? maximum : Math.Min((int) Math.Ceiling(2m * median), maximum);
+    internal static int GetMaximumScoreShownOnHistogram(int solvers, int minimum, decimal median, int maximum)
+        => solvers <= Configuration.LeaderboardPositionsShown || (maximum - minimum + 1) <= MaximumHistogramBuckets
+               ? maximum
+               : Math.Min(maximum, (int)Math.Ceiling(2m * median));
 }
 
 public const string ScoresKey = "TuringCompleteGameScores";
@@ -270,20 +275,43 @@ public record Level {
     public void DisplayHistogram() => Histogram.Dump($"{LevelId} Histogram");
 
     private Chart GenerateHistogram() {
+        void HandleHistogramClick(int scoresPerBucket, object sender, EventArgs e) {
+            if (!(sender is Chart windowsChart))
+                return;
+            if (!(e is MouseEventArgs typedEventArgs))
+                return;
+            HitTestResult hit = windowsChart.HitTest(typedEventArgs.X, typedEventArgs.Y);
+            if (hit.PointIndex < 0)
+                return;
+            if (Minimum + scoresPerBucket * hit.PointIndex <= Leaderboard[^1].Score.Sum)
+                DisplayLeaderboard();
+        }
+
         if (!Scored)
             return null;
-        int maximumShown = Configuration.GetMaximumScoreShownOnHistogram(Solvers, Median.Value, Maximum.Value);
-        LINQPadChart chart = Enumerable.Range(Minimum.Value, maximumShown)
+        int maximumShown = Configuration.GetMaximumScoreShownOnHistogram(Solvers, Minimum.Value, Median.Value, Maximum.Value);
+        int distinctScoresShown = maximumShown - Minimum.Value + 1;
+        int scoresPerBucket = (int)Math.Ceiling(((decimal)distinctScoresShown) / Configuration.MaximumHistogramBuckets);
+        int bucketCount = (int)Math.Ceiling((decimal)distinctScoresShown / scoresPerBucket);
+        int finalBucketStart = Minimum.Value + (bucketCount - 1) * scoresPerBucket;
+        Range finalBucket = finalBucketStart..Maximum.Value;
+        LINQPadChart chart = Enumerable.Range(0, bucketCount - 1)
+                                       .Select(i => Minimum.Value + i * scoresPerBucket)
+                                       .Select(i => i..(i + scoresPerBucket - 1))
+                                       .Append(finalBucket)
                                        .GroupJoin(ExtractCensoredScores(Entries),
-                                                  i => i,
-                                                  i => i,
-                                                  (i, iei) => (Sum: i, Count: (int?)iei.Count()))
-                                       .Select(t => (t.Sum, Count: Configuration.ChartScoresLogarithmically && t.Count == 0 ? null : t.Count))
+                                                  r => r.Start,
+                                                  score => (int)Math.Min(finalBucketStart, Minimum.Value + scoresPerBucket*((score - Minimum.Value) / scoresPerBucket)),
+                                                  (r, iei) => (Range: r, Count: (int?)iei.Count()))
+                                       .Select(t => (t.Range, Count: Configuration.ChartScoresLogarithmically && t.Count == 0 ? null : t.Count))
                                        .ToList()
-                                       .Chart(t => t.Sum)
+                                       .Chart(t => t.Range.ToTerseString())
                                        .AddYSeries(t => t.Count, name: "Frequency");
         Chart windowsChart = chart.ToWindowsChart();
+        windowsChart.Click += (sender, e) => HandleHistogramClick(scoresPerBucket, sender, e);
         windowsChart.Series["Frequency"].ToolTip = "#VAL scored #VALX";
+        if (Maximum.Value - finalBucketStart + 1 > scoresPerBucket)
+            windowsChart.Series["Frequency"].Points[^1].Color = Color.Purple;
         ChartArea chartArea = windowsChart.ChartAreas.Single();
         if (Configuration.LogarithmicHistograms) {
             chartArea.AxisY.IsLogarithmic = true;
@@ -406,4 +434,8 @@ public static double? CumulativeDistributionOfStandardNormalDistribution(double 
         erf = ApproximateErf(x);
     }
     return 0.5 + 0.5 * erf;
+}
+
+public static class Extensions {
+    public static string ToTerseString(this Range self) => self.Start.Equals(self.End) ? self.Start.ToString() : self.ToString();
 }
