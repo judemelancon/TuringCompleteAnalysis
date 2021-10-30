@@ -21,7 +21,7 @@ public static class Configuration {
     /// <summary>If set, scores above this threshold are removed from most statistics. null disables the censoring threshold entirely.</summary>
     /// <remarks>99,999 is currently the score for using an unscored component. It skews the statistics pretty badly to leave those in the calculations.</remarks>
     public static readonly int? ScoreCensoringThreshold = 99999;
-    /// <summary>If set, this produces and dumps a static image of the chart suitable for sharing.</summary>
+    /// <summary>If set, this produces and dumps static images of the charts suitable for sharing.</summary>
     public static readonly (int Width, int Height)? ChartImageDimensions = null; // e.g. (2000,1000)
     public const string NotApplicableText = "-";
     public const string IncompleteText = "i";
@@ -273,7 +273,12 @@ public record Level {
 
     public void DisplayLeaderboard() => Leaderboard.Dump($"{LevelId} Leaderboard", toDataGrid: true);
 
-    public void DisplayHistogram() => Histogram.Dump($"{LevelId} Histogram");
+    public void DisplayHistogram() {
+        Histogram.Dump($"{LevelId} Histogram");
+
+        if (Configuration.ChartImageDimensions.HasValue)
+            Histogram.ToBitmap(Configuration.ChartImageDimensions.Value.Width, Configuration.ChartImageDimensions.Value.Height).Dump($"{LevelId} Histogram Image");
+    }
 
     private Chart GenerateHistogram() {
         void HandleHistogramClick(int scoresPerBucket, object sender, EventArgs e) {
