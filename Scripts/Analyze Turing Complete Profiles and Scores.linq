@@ -17,6 +17,7 @@ public static class Configuration {
     public const bool ChartScoresLogarithmically = true;
     public const bool LogarithmicHistograms = false;
     public const int MaximumHistogramBuckets = 50;
+    public const int HistogramTooltipLinesBeforeExcludingZeroCounts = 10;
     /// <summary>If set, scores above this threshold are removed from most statistics. null disables the censoring threshold entirely.</summary>
     /// <remarks>99,999 is currently the score for using an unscored component. It skews the statistics pretty badly to leave those in the calculations.</remarks>
     public static readonly int? ScoreCensoringThreshold = 99999;
@@ -289,37 +290,78 @@ public record Level {
 
         if (!Scored)
             return null;
+
         int maximumShown = Configuration.GetMaximumScoreShownOnHistogram(Solvers, Minimum.Value, Median.Value, Maximum.Value);
         int distinctScoresShown = maximumShown - Minimum.Value + 1;
         int scoresPerBucket = (int)Math.Ceiling(((decimal)distinctScoresShown) / Configuration.MaximumHistogramBuckets);
         int bucketCount = (int)Math.Ceiling((decimal)distinctScoresShown / scoresPerBucket);
         int finalBucketStart = Minimum.Value + (bucketCount - 1) * scoresPerBucket;
         Range finalBucket = finalBucketStart..Maximum.Value;
-        LINQPadChart chart = Enumerable.Range(0, bucketCount - 1)
-                                       .Select(i => Minimum.Value + i * scoresPerBucket)
-                                       .Select(i => i..(i + scoresPerBucket - 1))
-                                       .Append(finalBucket)
-                                       .GroupJoin(ExtractCensoredScores(Entries),
-                                                  r => r.Start,
-                                                  score => (int)Math.Min(finalBucketStart, Minimum.Value + scoresPerBucket*((score - Minimum.Value) / scoresPerBucket)),
-                                                  (r, iei) => (Range: r, Count: (int?)iei.Count()))
-                                       .Select(t => (t.Range, Count: Configuration.ChartScoresLogarithmically && t.Count == 0 ? null : t.Count))
-                                       .ToList()
-                                       .Chart(t => t.Range.ToTerseString())
-                                       .AddYSeries(t => t.Count, name: "Frequency");
-        Chart windowsChart = chart.ToWindowsChart();
-        windowsChart.Click += (sender, e) => HandleHistogramClick(scoresPerBucket, sender, e);
-        windowsChart.Series["Frequency"].ToolTip = "#VAL scored #VALX";
-        if (Maximum.Value - finalBucketStart + 1 > scoresPerBucket)
-            windowsChart.Series["Frequency"].Points[^1].Color = Color.Purple;
-        ChartArea chartArea = windowsChart.ChartAreas.Single();
+
+        Chart chart = new Chart();
+        chart.Click += (sender, e) => HandleHistogramClick(scoresPerBucket, sender, e);
+        ChartArea area = chart.ChartAreas.Add("Histogram");
+        area.Position = new ElementPosition(0f, 0f, 100f, 100f);
+        area.AxisX.Interval = 1;
+        area.AxisX.MajorGrid.LineColor = Color.FromArgb(63, Color.Black);
+        area.AxisY.MajorGrid.LineColor = Color.FromArgb(63, Color.Black);
         if (Configuration.LogarithmicHistograms) {
-            chartArea.AxisY.IsLogarithmic = true;
-            chartArea.AxisY.LogarithmBase = 2.0;
-            chartArea.AxisY.Minimum = 0.5;
+            area.AxisY.IsLogarithmic = true;
+            area.AxisY.LogarithmBase = 2.0;
+            area.AxisY.Minimum = 0.5;
         }
-        return windowsChart;
+
+        Series series = chart.Series.Add("Frequency");
+        series.ToolTip = "#VAL scored #VALX";
+
+        IEnumerable<DataPoint> points = Enumerable.Range(0, bucketCount - 1)
+                                                  .Select(i => Minimum.Value + i * scoresPerBucket)
+                                                  .Select(i => i..(i + scoresPerBucket - 1))
+                                                  .Append(finalBucket)
+                                                  .GroupJoin(ExtractCensoredScores(Entries),
+                                                             r => r.Start,
+                                                             score => (int)Math.Min(finalBucketStart,
+                                                                                    Minimum.Value + scoresPerBucket * ((score - Minimum.Value) / scoresPerBucket)),
+                                                             (r, iei) => (Range: r,
+                                                                          RangeLength: r.End.Value - r.Start.Value + 1,
+                                                                          Count: (int?)iei.Count(),
+                                                                          ScoreCounts: iei.GroupBy(i => i)
+                                                                                          .ToDictionary(igii => igii.Key, igii => igii.Count())))
+                                                  .Select(t => (t.Range,
+                                                                Count: Configuration.ChartScoresLogarithmically && t.Count == 0 ? null : t.Count,
+                                                                Big: t.RangeLength > scoresPerBucket,
+                                                                ToolTip: GetHistogramColumnToolTip(t.RangeLength, t.Range.Start.Value, t.ScoreCounts)))
+                                                  .Select((t, i) => new DataPoint(0, t.Count ?? 0.0) {
+                                                      AxisLabel = t.Range.ToTerseString(),
+                                                      BackGradientStyle = GradientStyle.LeftRight,
+                                                      Color = GetHistogramColumnColor(t.Big, t.Range.Start.Value),
+                                                      BackSecondaryColor = GetHistogramColumnColor(t.Big, t.Range.End.Value),
+                                                      IsEmpty = !t.Count.HasValue,
+                                                      ToolTip = t.ToolTip
+                                                  });
+        foreach (DataPoint point in points)
+            series.Points.Add(point);
+        return chart;
     }
+
+    private string GetHistogramColumnToolTip(int rangeLength, int rangeState, Dictionary<int, int> scoreCounts) {
+        IEnumerable<int> scoresToShow = rangeLength < Configuration.HistogramTooltipLinesBeforeExcludingZeroCounts
+                                            ? Enumerable.Range(rangeState, rangeLength)
+                                            : scoreCounts.Keys.OrderBy(i => i);
+        return scoresToShow.Aggregate(new StringBuilder(),
+                                      (sb, i) => sb.AppendFormat("{0} scored {1}", scoreCounts.GetValueOrDefault(i), i)
+                                                   .AppendLine(),
+                                      sb => sb.ToString());
+    }
+
+    private Color GetHistogramColumnColor(bool bigBucket, int score)
+        => score <= Median.Value
+               ? score <= Leaderboard[^1].Score.Sum
+                   ? Color.MediumSeaGreen
+                   : Color.Teal
+               : bigBucket
+                   ? Color.Purple
+                   : Color.CadetBlue;
 
     private object ToDump()
         => new {
