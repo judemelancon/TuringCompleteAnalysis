@@ -56,13 +56,6 @@ public void Main() {
 }
 
 public static void ChartPlayers(IReadOnlyList<Player> includedPlayers) {
-    int? GetPlayerScore(Level leaderboard, int playerId) {
-        int? scoreSum = leaderboard.Entries.SingleOrDefault(le => le.Score.PlayerId == playerId)?.Score.Sum;
-        if (Configuration.ChartScoresLogarithmically && scoreSum.HasValue)
-            return Math.Max(1, scoreSum.Value);
-        return scoreSum;
-    }
-
     void HandleChartClick(object sender, EventArgs e) {
         if (!(sender is Chart windowsChart))
             return;
@@ -73,43 +66,87 @@ public static void ChartPlayers(IReadOnlyList<Player> includedPlayers) {
             Levels[hit.PointIndex].DisplayLeaderboard();
     }
 
-    LINQPadChart<Level> chart = Levels.Where(l => !Configuration.ChartOnlyScoredLevels || l.Scored)
-                                      .Chart(l => l.LevelId)
-                                      .AddYSeries(l => Configuration.ChartScoresLogarithmically && l.Minimum == 0 ? null : l.Minimum,
-                                                  Util.SeriesType.Column,
-                                                  name: "Best")
-                                      .AddYSeries(l => Configuration.ChartScoresLogarithmically && l.Median == 0m ? null : l.Median,
-                                                  Util.SeriesType.Column,
-                                                  name: "Median")
-                                      .AddYSeries(l => l.Solvers, Util.SeriesType.Area, name: "Solvers", useSecondaryYAxis: true);
-    foreach (Player player in includedPlayers)
-        chart.AddYSeries(l => GetPlayerScore(l, player.Id), Util.SeriesType.Point, name: player.Name);
-
-    Chart windowsChart = chart.ToWindowsChart();
-    windowsChart.Click += HandleChartClick;
-    windowsChart.Series["Best"].ToolTip = "#VAL is the best score achieved for #VALX";
-    windowsChart.Series["Median"].ToolTip = "#VAL{n1} is the median score achieved for #VALX";
-    windowsChart.Series["Solvers"].Color = System.Drawing.Color.FromArgb(63, System.Drawing.Color.Gray);
-    windowsChart.Series["Solvers"].ToolTip = "#VAL players have solved #VALX";
-    foreach (Player player in includedPlayers) {
-        Series series = windowsChart.Series[player.Name];
-        series.MarkerSize = 9;
-        series.ToolTip = player.Name + " did #VALX in #VAL";
-    }
-    ChartArea chartArea = windowsChart.ChartAreas.Single();
-    chartArea.AxisY.IsStartedFromZero = true;
-    chartArea.AxisY.Title = (Configuration.ChartScoresLogarithmically ? "Binary Logarithm of " : string.Empty) + "Sum of Scores";
+    Chart chart = new Chart();
+    chart.Click += HandleChartClick;
+    Legend legend = chart.Legends.Add("Legend");
+    legend.Position = new ElementPosition(0f, 95f, 100f, 5f);
+    ChartArea area = chart.ChartAreas.Add("Levels Chart");
+    area.Position = new ElementPosition(0f, 0f, 100f, 95f);
+    area.AxisX.Interval = 1;
+    area.AxisX.MajorGrid.LineColor = Color.FromArgb(63, Color.Black);
+    area.AxisY.MajorGrid.LineColor = Color.FromArgb(63, Color.Black);
+    area.AxisY.Title = (Configuration.ChartScoresLogarithmically ? "Binary Logarithm of " : string.Empty) + "Sum of Scores";
     if (Configuration.ChartScoresLogarithmically) {
-        chartArea.AxisY.IsLogarithmic = true;
-        chartArea.AxisY.LogarithmBase = 2.0;
+        area.AxisY.IsLogarithmic = true;
+        area.AxisY.LogarithmBase = 2.0;
+        area.AxisY.Minimum = 1;
     }
-    chartArea.AxisY2.Title = "Solvers";
-    chartArea.AxisY2.IsStartedFromZero = true;
-    chartArea.AxisY2.MajorGrid.Enabled = false;
+    else {
+        area.AxisY.IsStartedFromZero = true;
+    }
+    area.AxisY2.Title = "Solvers";
+    area.AxisY2.IsStartedFromZero = true;
+    area.AxisY2.MajorGrid.Enabled = false;
 
-    windowsChart.Dump();
+
+    {
+        Series series = chart.Series.Add("Solvers");
+        series.ChartType = SeriesChartType.Area;
+        series.Color = System.Drawing.Color.FromArgb(63, System.Drawing.Color.Gray);
+        series.YAxisType = AxisType.Secondary;
+        foreach (Level level in Levels)
+            series.Points.Add(new DataPoint(0.0, level.Solvers) {
+                AxisLabel = level.LevelId,
+                ToolTip = $"{level.SolversText} players have solved {level.LevelId}"
+            });
+    }
+    {
+        Series series = chart.Series.Add("Distribution");
+        series.ChartType = SeriesChartType.Candlestick;
+        series.Color = Color.LimeGreen;
+        series.BorderWidth = 3;
+        series.SetCustomProperty("PriceUpColor", $"#{Color.Green.ToArgb():x2}");
+        series.SetCustomProperty("PriceDownColor", $"#{Color.LightGreen.ToArgb():x2}");
+        foreach (Level level in Levels) {
+            DataPoint point = new DataPoint {
+                AxisLabel = level.LevelId,
+                IsEmpty = !level.Scored
+            };
+            if (level.Minimum.HasValue) {
+                point.ToolTip = $"{level.LevelId}{Environment.NewLine}Best {level.MinimumText}{Environment.NewLine}Median {level.MedianText}{Environment.NewLine}Mean {level.MeanText}{Environment.NewLine}Worst {level.MaximumText}";
+                point.YValues = new[] {
+                                        Math.Max(0.5, level.Maximum.Value),
+                                        Math.Max(0.5, level.Minimum.Value),
+                                        Math.Max(0.5, (double)level.Median.Value),
+                                        Math.Max(0.5, level.Mean.Value)
+                                      };
+            }
+            else {
+                point.ToolTip = $"{level.LevelId} is not scored";
+            }
+            series.Points.Add(point);
+        }
+    }
+    foreach (Player player in includedPlayers) {
+        Series series = chart.Series.Add(player.Name);
+        series.ChartType = SeriesChartType.Point;
+        series.MarkerSize = 9;
+        foreach (Level level in Levels) {
+            int? score = level.Entries.SingleOrDefault(le => le.Score.PlayerId == player.Id)?.Score.Sum;
+            double chartedScore = Configuration.ChartScoresLogarithmically && score.HasValue
+                                      ? Math.Max(1, score.Value)
+                                      : score ?? 0.0;
+            series.Points.Add(new DataPoint(0, chartedScore) {
+                AxisLabel = level.LevelId,
+                IsEmpty = !score.HasValue,
+                ToolTip = $"{player.Name} did {level.LevelId} in {score:n0}"
+            });
+        }
+    }
+
+    chart.Dump();
     if (Configuration.ChartImageDimensions.HasValue)
-        windowsChart.ToBitmap(Configuration.ChartImageDimensions.Value.Width, Configuration.ChartImageDimensions.Value.Height).Dump("Chart Image");
+        chart.ToBitmap(Configuration.ChartImageDimensions.Value.Width, Configuration.ChartImageDimensions.Value.Height).Dump("Chart Image");
 }
 
 public static async Task<IReadOnlyList<Player>> GetPlayersAsync() {
