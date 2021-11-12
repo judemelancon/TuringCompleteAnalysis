@@ -166,7 +166,7 @@ public static async Task<IReadOnlyList<Player>> GetPlayersAsync() {
                                                  .OrderBy(p => p.Name)
                                                  .ThenBy(p => p.Id)
                                                  .ToArray();
-    $"{players.Count} players{(fromCache ? " from cache" : string.Empty)}".Dump();
+    $"{players.Count:n0} players{(fromCache ? " from cache" : string.Empty)}".Dump();
     return players;
 }
 
@@ -184,7 +184,7 @@ public static async Task<IReadOnlyList<Score>> GetScoresAsync() {
                                                                           int.Parse(fields[3]),
                                                                           int.Parse(fields[4])))
                                               .ToArray();
-    $"{scores.Count} scores{(fromCache ? " from cache" : string.Empty)}".Dump();
+    $"{scores.Count:n0} scores{(fromCache ? " from cache" : string.Empty)}".Dump();
     return scores;
 }
 
