@@ -39,9 +39,9 @@ public static HttpClient Client { get; } = new HttpClient();
 public static IReadOnlyList<Player> Players { get; } = GetPlayersAsync().ConfigureAwait(false).GetAwaiter().GetResult();
 public static IReadOnlyList<Score> Scores { get; } = GetScoresAsync().ConfigureAwait(false).GetAwaiter().GetResult();
 private static IReadOnlyDictionary<int, Player> _PlayerMap;
-public static IReadOnlyDictionary<int, Player> PlayerMap => _PlayerMap ?? (_PlayerMap = Players.ToDictionary(p => p.Id));
+public static IReadOnlyDictionary<int, Player> PlayerMap => _PlayerMap ??= Players.ToDictionary(p => p.Id);
 private static IReadOnlyList<Level> _Levels;
-public static IReadOnlyList<Level> Levels => _Levels ?? (_Levels = Level.ConstructLevels());
+public static IReadOnlyList<Level> Levels => _Levels ??= Level.ConstructLevels();
 
 public void Main() {
     Levels.Dump("Levels", toDataGrid: true);
@@ -185,8 +185,7 @@ public static async Task<IReadOnlyList<Score>> GetScoresAsync() {
 
 public record Player(int Id, string Name) {
     private IReadOnlyList<object> _Placements;
-    public IReadOnlyList<object> Placements
-        => _Placements ?? (_Placements = Levels.Select(level => new PlacementEntry(level, level.Entries.SingleOrDefault(le => le.Score.PlayerId == Id))).ToList());
+    public IReadOnlyList<object> Placements => _Placements ??= Levels.Select(level => new PlacementEntry(level, level.Entries.SingleOrDefault(le => le.Score.PlayerId == Id))).ToList();
     public Hyperlinq PlacementsLink => new Hyperlinq(ShowPlacements, "Placements");
     public Hyperlinq ProfileLink { get; } = new Hyperlinq($"https://turingcomplete.game/profile/{Id}",
                                                   Name == null
@@ -275,10 +274,10 @@ public record Level {
     public int Solvers => Entries.Count;
 
     private IReadOnlyList<LeaderboardEntry> _Leaderboard;
-    public IReadOnlyList<LeaderboardEntry> Leaderboard => _Leaderboard ?? (_Leaderboard = Entries.Take(Configuration.LeaderboardPositionsShown).ToList());
+    public IReadOnlyList<LeaderboardEntry> Leaderboard => _Leaderboard ??= Entries.Take(Configuration.LeaderboardPositionsShown).ToList();
 
     private Chart _Histogram;
-    private Chart Histogram => _Histogram ?? (_Histogram = GenerateHistogram());
+    private Chart Histogram => _Histogram ??= GenerateHistogram();
 
     public string SolversText => Solvers.ToString("n0");
     public string TiedForFirstText => TiedForFirst?.ToString("n0") ?? Configuration.NotApplicableText;
