@@ -5,7 +5,7 @@ The game starts with basic logic gates and builds to assembly programming on a c
 Eventually, players unlock scoring based on gates, delay, and ticks.
 This tool generates leaderboards, displays placements by player, shows level score statistics, and makes charts.
 
-A [non-interactive snapshot of some of its output](Snapshots\README.md) is available.
+A [non-interactive snapshot of some of its output](Snapshots/README.md) is available.
 
 ## Getting Started
 
