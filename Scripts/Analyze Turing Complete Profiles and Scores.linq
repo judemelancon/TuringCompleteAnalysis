@@ -197,7 +197,7 @@ public static void UpdateSnapshotMarkdown() {
                                                                                                    sb => sb.AppendLine(m.Groups["closer"].Value)
                                                                                                            .ToString()));
 
-    processed.Dump(nameof(processed));
+    //processed.Dump(nameof(processed));
     File.WriteAllText(Configuration.SnapshotMarkdownFilePath, processed);
 }
 
