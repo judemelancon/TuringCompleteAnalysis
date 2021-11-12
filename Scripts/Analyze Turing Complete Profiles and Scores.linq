@@ -188,12 +188,17 @@ public static void UpdateSnapshotMarkdown() {
     processed = Configuration.SnapshotIntroductionReplacementPattern.Replace(processed,
                                                                              m => m.Groups["comment"].Value + $"This was generated at {DateTime.UtcNow:u} when there were {Scores.Count:n0} scores from {Players.Count:n0} players.");
 
+
+    // This uses HTML <img> tags instead of Markdown images.
+    // GitHub doesn't support embedding these images with Markdown, perhaps due to their dimensions.
+    // See https://github.com/judemelancon/TuringCompleteAnalysis/blob/b35b74977120d06bf4df7a2427bd74ec1675e085/Snapshots/README.md e.g.
+    // In any case, GitHub supports the images fine via HTML.
     processed = Configuration.SnapshotLevelDetailsReplacementPattern.Replace(processed,
                                                                              m => Levels.Aggregate((new StringBuilder()).AppendLine(m.Groups["opener"].Value)
                                                                                                                         .AppendLine("Level|Solvers|in First|Best|Median|Mean|Histogram")
                                                                                                                         .AppendLine("-----|-------|--------|----|------|----|---------"),
                                                                                                    (sb, l) => sb.Append($"{l.LevelId}|{l.SolversText}|{l.TiedForFirstText}|{l.MinimumText}|{l.MedianText}|{l.MeanText}|")
-                                                                                                                .AppendLine(l.Scored ? $"![Histogram for {l.LevelId}](histogram {l.LevelId}.png)" : "unscored"),
+                                                                                                                .AppendLine(l.Scored ? $"<img alt=\"Histogram for {l.LevelId}\" width=\"300\" src=\"histogram {l.LevelId}.png\" />" : "unscored"),
                                                                                                    sb => sb.AppendLine(m.Groups["closer"].Value)
                                                                                                            .ToString()));
 
