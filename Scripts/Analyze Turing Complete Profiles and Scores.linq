@@ -22,7 +22,7 @@ public static class Configuration {
     /// <remarks>99,999 is currently the score for using an unscored component. It skews the statistics pretty badly to leave those in the calculations.</remarks>
     public static readonly int? ScoreCensoringThreshold = 99999;
     /// <summary>If set, this produces and dumps static images of the charts suitable for sharing.</summary>
-    public static readonly (int Width, int Height)? ChartImageDimensions = null; // e.g. (2000,1000)
+    public static readonly Size? DumpedImageDimensions = null; // e.g. new Size(2000,1000)
     public const string NotApplicableText = "-";
     public const string IncompleteText = "i";
 
@@ -52,10 +52,10 @@ public void Main() {
                                                          .ToArray();
     foreach (Player player in selectedPlayers)
         player.ShowPlacements();
-    ChartPlayers(selectedPlayers);
+    DumpLevelChart(selectedPlayers);
 }
 
-public static void ChartPlayers(IReadOnlyList<Player> includedPlayers) {
+public static Chart GenerateLevelChart(IReadOnlyList<Player> includedPlayers) {
     void HandleChartClick(object sender, EventArgs e) {
         if (!(sender is Chart windowsChart))
             return;
@@ -144,9 +144,14 @@ public static void ChartPlayers(IReadOnlyList<Player> includedPlayers) {
         }
     }
 
+    return chart;
+}
+
+public static void DumpLevelChart(IReadOnlyList<Player> includedPlayers) {
+    using Chart chart = GenerateLevelChart(includedPlayers);
     chart.Dump();
-    if (Configuration.ChartImageDimensions.HasValue)
-        chart.ToBitmap(Configuration.ChartImageDimensions.Value.Width, Configuration.ChartImageDimensions.Value.Height).Dump("Chart Image");
+    if (Configuration.DumpedImageDimensions.HasValue)
+        chart.ToBitmap(Configuration.DumpedImageDimensions.Value.Width, Configuration.DumpedImageDimensions.Value.Height).Dump("Chart Image");
 }
 
 public static async Task<IReadOnlyList<Player>> GetPlayersAsync() {
@@ -312,8 +317,8 @@ public record Level {
     public void DisplayHistogram() {
         Histogram.Dump($"{LevelId} Histogram");
 
-        if (Configuration.ChartImageDimensions.HasValue)
-            Histogram.ToBitmap(Configuration.ChartImageDimensions.Value.Width, Configuration.ChartImageDimensions.Value.Height).Dump($"{LevelId} Histogram Image");
+        if (Configuration.DumpedImageDimensions.HasValue)
+            Histogram.ToBitmap(Configuration.DumpedImageDimensions.Value.Width, Configuration.DumpedImageDimensions.Value.Height).Dump($"{LevelId} Histogram Image");
     }
 
     private Chart GenerateHistogram() {
