@@ -30,6 +30,15 @@ public static class Configuration {
         => solvers <= Configuration.LeaderboardPositionsShown || (maximum - minimum + 1) <= MaximumHistogramBuckets
                ? maximum
                : Math.Min(maximum, (int)Math.Ceiling(2m * median));
+
+    // The remaining configuration settings all relate specifically to snapshot generation.
+    public const bool EnableSnapshotGeneration = false;
+    public static readonly string SnapshotDirectory = Path.GetFullPath(Path.Combine(Path.GetDirectoryName(Util.CurrentQueryPath), "..", "Snapshots"));
+    public static readonly string SnapshotMarkdownFilePath = Path.Combine(SnapshotDirectory, "README.md");
+    public static readonly Size LevelChartSnapshotDimensions = new Size(1500, 900);
+    public static readonly Size HistogramSnapshotDimensions = new Size(1000, 500);
+    public static readonly Regex SnapshotIntroductionReplacementPattern = new Regex(@"(?<comment><!--\s*IntroductionReplacementTarget.*?-->).*$", RegexOptions.Compiled | RegexOptions.CultureInvariant | RegexOptions.Multiline);
+    public static readonly Regex SnapshotLevelDetailsReplacementPattern = new Regex(@"(?<opener><!--\s*LevelDetailsReplacementTarget.*?-->).*(?<closer><!--/LevelDetailsReplacementTarget-->)", RegexOptions.Compiled | RegexOptions.CultureInvariant | RegexOptions.Singleline);
 }
 
 public const string ScoresKey = "TuringCompleteGameScores";
@@ -53,6 +62,9 @@ public void Main() {
     foreach (Player player in selectedPlayers)
         player.ShowPlacements();
     DumpLevelChart(selectedPlayers);
+
+    if (Configuration.EnableSnapshotGeneration)
+        SaveSnapshots();
 }
 
 public static Chart GenerateLevelChart(IReadOnlyList<Player> includedPlayers) {
@@ -67,6 +79,7 @@ public static Chart GenerateLevelChart(IReadOnlyList<Player> includedPlayers) {
     }
 
     Chart chart = new Chart();
+    chart.Size = Configuration.LevelChartSnapshotDimensions;
     chart.Click += HandleChartClick;
     Legend legend = chart.Legends.Add("Legend");
     legend.Position = new ElementPosition(0f, 95f, 100f, 5f);
@@ -152,6 +165,40 @@ public static void DumpLevelChart(IReadOnlyList<Player> includedPlayers) {
     chart.Dump();
     if (Configuration.DumpedImageDimensions.HasValue)
         chart.ToBitmap(Configuration.DumpedImageDimensions.Value.Width, Configuration.DumpedImageDimensions.Value.Height).Dump("Chart Image");
+}
+
+public static void SaveSnapshots() {
+    $"Saving snapshots to {Configuration.SnapshotDirectory}".Dump();
+    Directory.CreateDirectory(Configuration.SnapshotDirectory);
+
+    foreach (Level level in Levels)
+        level.Histogram?.SaveImage(Path.Combine(Configuration.SnapshotDirectory, $"histogram {level.LevelId}.png"), ChartImageFormat.Png);
+
+    using Chart levelChart = GenerateLevelChart(new Player[0]);
+    levelChart.SaveImage(Path.Combine(Configuration.SnapshotDirectory, "level chart.png"), ChartImageFormat.Png);
+
+    UpdateSnapshotMarkdown();
+}
+
+public static void UpdateSnapshotMarkdown() {
+    string initial = File.ReadAllText(Configuration.SnapshotMarkdownFilePath);
+    //initial.Dump(nameof(initial));
+    string processed = initial;
+
+    processed = Configuration.SnapshotIntroductionReplacementPattern.Replace(processed,
+                                                                             m => m.Groups["comment"].Value + $"This was generated at {DateTime.UtcNow:u} when there were {Scores.Count:n0} scores from {Players.Count:n0} players.");
+
+    processed = Configuration.SnapshotLevelDetailsReplacementPattern.Replace(processed,
+                                                                             m => Levels.Aggregate((new StringBuilder()).AppendLine(m.Groups["opener"].Value)
+                                                                                                                        .AppendLine("Level|Solvers|in First|Best|Median|Mean|Histogram")
+                                                                                                                        .AppendLine("-----|-------|--------|----|------|----|---------"),
+                                                                                                   (sb, l) => sb.Append($"{l.LevelId}|{l.SolversText}|{l.TiedForFirstText}|{l.MinimumText}|{l.MedianText}|{l.MeanText}|")
+                                                                                                                .AppendLine(l.Scored ? $"![Histogram for {l.LevelId}](histogram {l.LevelId}.png)" : "unscored"),
+                                                                                                   sb => sb.AppendLine(m.Groups["closer"].Value)
+                                                                                                           .ToString()));
+
+    processed.Dump(nameof(processed));
+    File.WriteAllText(Configuration.SnapshotMarkdownFilePath, processed);
 }
 
 public static async Task<IReadOnlyList<Player>> GetPlayersAsync() {
@@ -282,7 +329,7 @@ public record Level {
     public IReadOnlyList<LeaderboardEntry> Leaderboard => _Leaderboard ??= Entries.Take(Configuration.LeaderboardPositionsShown).ToList();
 
     private Chart _Histogram;
-    private Chart Histogram => _Histogram ??= GenerateHistogram();
+    internal Chart Histogram => _Histogram ??= GenerateHistogram();
 
     public string SolversText => Solvers.ToString("n0");
     public string TiedForFirstText => TiedForFirst?.ToString("n0") ?? Configuration.NotApplicableText;
@@ -345,6 +392,7 @@ public record Level {
         Range finalBucket = finalBucketStart..Maximum.Value;
 
         Chart chart = new Chart();
+        chart.Size = Configuration.HistogramSnapshotDimensions;
         chart.Click += (sender, e) => HandleHistogramClick(scoresPerBucket, sender, e);
         ChartArea area = chart.ChartAreas.Add("Histogram");
         area.Position = new ElementPosition(0f, 0f, 100f, 100f);
